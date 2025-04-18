@@ -58,15 +58,17 @@
 <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
 
 <script>
-  function checkLogin() {
-    const pw = document.getElementById("admin-password").value;
-    if (pw === "popnsecret") {
-      document.getElementById("login-screen").style.display = "none";
-      document.getElementById("admin-content").style.display = "block";
-    } else {
-      alert("パスワードが違います");
-    }
+function checkLogin() {
+  const password = document.getElementById("password").value;
+  if (password === "popnsecret") { // ✅ ここはお主の秘密のパスワードに置き換えるがよい
+    localStorage.setItem("admin_logged_in", "true");
+    alert("ログイン成功じゃ！");
+    window.location.href = "dashboard.html"; // ✅ ログイン後に遷移させたいページがあればここを変更
+  } else {
+    alert("貴様、パスワードを間違えておる！");
   }
+}
+</script>
 
   const firebaseConfig = {
     apiKey: "AIzaSyBnZwM6BHJCmbtecKiyskrjP0CKozFlfmk",
