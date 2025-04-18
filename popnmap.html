@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ポップン設置店舗マップ</title>
+  <meta charset="UTF-8" />
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 1em;
+    }
+    form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5em;
+    }
+    form input, form select, form button {
+      flex: 1 1 200px;
+      padding: 0.5em;
+    }
+    #map {
+      height: 400px;
+      width: 100%;
+      margin-top: 1em;
+    }
+    #location-list li {
+      background: #f9f9f9;
+      margin-bottom: 0.5em;
+      padding: 0.5em;
+      border-radius: 5px;
+    }
+    @media (min-width: 768px) {
+      main {
+        display: flex;
+        gap: 1em;
+      }
+      #map {
+        flex: 2;
+        height: 600px;
+      }
+      #location-list {
+        flex: 1;
+        max-height: 600px;
+        overflow-y: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<h1>ポップンミュージック 設置店マップ</h1>
+
+<form id="add-location-form">
+  <input type="text" id="name" placeholder="ゲーセン名" required />
+  <input type="text" id="address" placeholder="住所" required />
+  <input type="number" id="lat" placeholder="緯度" step="any" required />
+  <input type="number" id="lng" placeholder="経度" step="any" required />
+  <input type="text" id="poster" placeholder="投稿者名 (任意)" />
+  <select id="version" required>
+    <option value="">シリーズ選択</option>
+    <option value="現行">現行</option>
+    <option value="旧シリーズ">旧シリーズ</option>
+  </select>
+  <button type="submit" id="submit-button">追加</button>
+  <button type="button" id="cancel-edit" style="display:none;">キャンセル</button>
+</form>
+
+<br>
+<label>
+  🎮 フィルター:
+  <select id="filter-version">
+    <option value="">すべて表示</option>
+    <option value="現行">現行のみ</option>
+    <option value="旧シリーズ">旧シリーズのみ</option>
+  </select>
+</label>
+
+<main>
+  <div id="map"></div>
+  <div>
+    <h2>設置店舗リスト</h2>
+    <ul id="location-list"></ul>
+  </div>
+</main>
+
+<!-- Google Maps API -->
+<script async defer
+  src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY&callback=initMap">
+</script>
+
+<!-- Firebase互換バージョン -->
+<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyBnZwM6BHJCmbtecKiyskrjP0CKozFlfmk",
+    authDomain: "popn-map.firebaseapp.com",
+    projectId: "popn-map",
+    storageBucket: "popn-map.appspot.com",
+    messagingSenderId: "762190424333",
+    appId: "1:762190424333:web:50dbb7d6c49ec21dc16844"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const locationsRef = db.collection("locations");
+
+  let map;
+  let markers = [];
+  let editId = null;
+
+  function addMarkerToMap(map, loc) {
+    const marker = new google.maps.Marker({
+      position: { lat: loc.lat, lng: loc.lng },
+      map: map,
+      title: loc.name
+    });
+
+    const info = new google.maps.InfoWindow({
+      content: `<h3>${loc.name}</h3><p>${loc.address}</p><p>🎵 ${loc.version}</p><p>📝投稿者: ${loc.poster || "匿名"}</p>`
+    });
+
+    marker.addListener("click", () => info.open(map, marker));
+    markers.push(marker);
+    return marker;
+  }
+
+  function clearMarkers() {
+    markers.forEach(m => m.setMap(null));
+    markers = [];
+  }
+
+  function addItemToList(map, loc, marker, docId) {
+    const listEl = document.getElementById("location-list");
+    const li = document.createElement("li");
+    const date = loc.createdAt?.toDate?.().toLocaleString?.() || "";
+
+    li.innerHTML = `
+      <strong>${loc.name}</strong> (${loc.address})<br>
+      🎮 ${loc.version}<br>
+      📝 ${loc.poster || "匿名"} ${date}<br>
+      <button data-id="${docId}" class="edit-btn">編集</button>
+    `;
+
+    li.querySelector(".edit-btn").addEventListener("click", () => {
+      document.getElementById("name").value = loc.name;
+      document.getElementById("address").value = loc.address;
+      document.getElementById("lat").value = loc.lat;
+      document.getElementById("lng").value = loc.lng;
+      document.getElementById("poster").value = loc.poster;
+      document.getElementById("version").value = loc.version;
+      editId = docId;
+      document.getElementById("submit-button").textContent = "更新";
+      document.getElementById("cancel-edit").style.display = "inline";
+      map.setZoom(16);
+      map.panTo(marker.getPosition());
+    });
+
+    li.addEventListener("click", () => {
+      map.setZoom(16);
+      map.panTo(marker.getPosition());
+    });
+
+    listEl.appendChild(li);
+  }
+
+  async function loadMarkers(map) {
+    const filter = document.getElementById("filter-version").value;
+    const snapshot = await locationsRef.orderBy("createdAt", "desc").get();
+
+    clearMarkers();
+    const listEl = document.getElementById("location-list");
+    listEl.innerHTML = "";
+
+    snapshot.forEach(doc => {
+      const loc = doc.data();
+      if (filter && loc.version !== filter) return;
+      const marker = addMarkerToMap(map, loc);
+      addItemToList(map, loc, marker, doc.id);
+    });
+  }
+
+  document.getElementById("add-location-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("name").value;
+    const address = document.getElementById("address").value;
+    const lat = parseFloat(document.getElementById("lat").value);
+    const lng = parseFloat(document.getElementById("lng").value);
+    const poster = document.getElementById("poster")?.value || "匿名";
+    const version = document.getElementById("version").value;
+
+    if (editId) {
+      await db.collection("locations").doc(editId).update({
+        name, address, lat, lng, poster, version
+      });
+      alert("更新しました！");
+      editId = null;
+      document.getElementById("submit-button").textContent = "追加";
+      document.getElementById("cancel-edit").style.display = "none";
+    } else {
+      await locationsRef.add({ name, address, lat, lng, poster, version, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      alert("追加しました！");
+    }
+
+    document.getElementById("add-location-form").reset();
+    loadMarkers(map);
+  });
+
+  document.getElementById("cancel-edit").addEventListener("click", () => {
+    document.getElementById("add-location-form").reset();
+    document.getElementById("submit-button").textContent = "追加";
+    editId = null;
+    document.getElementById("cancel-edit").style.display = "none";
+  });
+
+  document.getElementById("filter-version").addEventListener("change", () => {
+    loadMarkers(map);
+  });
+
+  window.initMap = function () {
+    map = new google.maps.Map(document.getElementById("map"), {
+      zoom: 12,
+      center: { lat: 35.68, lng: 139.76 }
+    });
+
+    map.addListener("click", (e) => {
+      document.getElementById("lat").value = e.latLng.lat();
+      document.getElementById("lng").value = e.latLng.lng();
+    });
+
+    loadMarkers(map);
+  };
+
+  // 住所入力から緯度経度自動取得
+  document.getElementById("address").addEventListener("blur", () => {
+    const address = document.getElementById("address").value;
+    if (!address) return;
+
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ address }, (results, status) => {
+      if (status === "OK") {
+        const loc = results[0].geometry.location;
+        document.getElementById("lat").value = loc.lat();
+        document.getElementById("lng").value = loc.lng();
+      }
+    });
+  });
+</script>
+</body>
+</html>
