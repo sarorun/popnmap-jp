@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>管理者ページ | ポップン設置マップ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: sans-serif; padding: 1em; }
+    form, #login-screen { margin-bottom: 1em; }
+    form input, form select, form textarea, form button {
+      display: block;
+      width: 100%;
+      margin: 0.5em 0;
+      padding: 0.5em;
+    }
+    #map { width: 100%; height: 400px; margin: 1em 0; }
+    #location-list li {
+      background: #f2f2f2;
+      margin-bottom: 0.5em;
+      padding: 0.5em;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="login-screen">
+  <h2>管理者ログイン</h2>
+  <input type="password" id="admin-password" placeholder="パスワード">
+  <button onclick="checkLogin()">ログイン</button>
+</div>
+
+<div id="admin-content" style="display:none;">
+  <h1>ポップン設置店 管理ページ</h1>
+  <form id="add-location-form">
+    <input type="text" id="name" placeholder="ゲーセン名" required>
+    <input type="text" id="address" placeholder="住所" required>
+    <input type="number" id="lat" placeholder="緯度" step="any" required>
+    <input type="number" id="lng" placeholder="経度" step="any" required>
+    <input type="text" id="poster" placeholder="投稿者名">
+    <select id="version" required>
+      <option value="">シリーズ選択</option>
+      <option value="現行">現行</option>
+      <option value="旧シリーズ">旧シリーズ</option>
+    </select>
+    <textarea id="comment" placeholder="コメント" rows="2"></textarea>
+    <button type="submit" id="submit-button">追加</button>
+    <button type="button" id="cancel-edit" style="display:none;">キャンセル</button>
+  </form>
+
+  <div id="map"></div>
+  <h2>店舗一覧</h2>
+  <ul id="location-list"></ul>
+</div>
+
+<script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY&callback=initMap" async defer></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+
+<script>
+  function checkLogin() {
+    const pw = document.getElementById("admin-password").value;
+    if (pw === "popnsecret") {
+      document.getElementById("login-screen").style.display = "none";
+      document.getElementById("admin-content").style.display = "block";
+    } else {
+      alert("パスワードが違います");
+    }
+  }
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBnZwM6BHJCmbtecKiyskrjP0CKozFlfmk",
+    authDomain: "popn-map.firebaseapp.com",
+    projectId: "popn-map",
+    storageBucket: "popn-map.appspot.com",
+    messagingSenderId: "762190424333",
+    appId: "1:762190424333:web:50dbb7d6c49ec21dc16844"
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+  const locationsRef = db.collection("locations");
+
+  let map;
+  let markers = [];
+  let editId = null;
+
+  function addMarkerToMap(map, loc) {
+    const marker = new google.maps.Marker({
+      position: { lat: loc.lat, lng: loc.lng },
+      map: map,
+      title: loc.name
+    });
+
+    const info = new google.maps.InfoWindow({
+      content: \`
+        <h3>\${loc.name}</h3>
+        <p>\${loc.address}</p>
+        <p>🎮 \${loc.version}</p>
+        <p>📝 \${loc.poster || "匿名"}</p>
+        <p>💬 \${loc.comment || ""}</p>
+        <a href="https://www.google.com/maps/search/?api=1&query=\${loc.lat},\${loc.lng}" target="_blank">📍 Googleマップで開く</a>
+      \`
+    });
+
+    marker.addListener("click", () => info.open(map, marker));
+    markers.push(marker);
+    return marker;
+  }
+
+  function clearMarkers() {
+    markers.forEach(m => m.setMap(null));
+    markers = [];
+  }
+
+  function addItemToList(map, loc, marker, docId) {
+    const listEl = document.getElementById("location-list");
+    const li = document.createElement("li");
+    const created = loc.createdAt?.toDate()?.toLocaleString?.() || "";
+    const updated = loc.updatedAt?.toDate()?.toLocaleString?.() || "";
+
+    li.innerHTML = \`
+      <strong>\${loc.name}</strong> (\${loc.address})<br>
+      🎮 \${loc.version}<br>
+      📝 \${loc.poster || "匿名"}<br>
+      💬 \${loc.comment || ""}<br>
+      🕒 登録: \${created} \${updated ? "<br>🔄 更新: " + updated : ""}
+      <br>
+      <button onclick="editLocation('\${docId}', \`${JSON.stringify(loc).replace(/"/g, '&quot;')}\`)">編集</button>
+      <button onclick="deleteLocation('\${docId}')">削除</button>
+    \`;
+
+    li.addEventListener("click", () => {
+      map.setZoom(16);
+      map.panTo(marker.getPosition());
+    });
+
+    listEl.appendChild(li);
+  }
+
+  function editLocation(docId, locJson) {
+    const loc = JSON.parse(locJson);
+    document.getElementById("name").value = loc.name;
+    document.getElementById("address").value = loc.address;
+    document.getElementById("lat").value = loc.lat;
+    document.getElementById("lng").value = loc.lng;
+    document.getElementById("poster").value = loc.poster;
+    document.getElementById("version").value = loc.version;
+    document.getElementById("comment").value = loc.comment;
+    editId = docId;
+    document.getElementById("submit-button").textContent = "更新";
+    document.getElementById("cancel-edit").style.display = "inline";
+  }
+
+  async function deleteLocation(docId) {
+    if (confirm("本当に削除しますか？")) {
+      await db.collection("locations").doc(docId).delete();
+      loadMarkers(map);
+    }
+  }
+
+  async function loadMarkers(map) {
+    const snapshot = await locationsRef.orderBy("createdAt", "desc").get();
+    clearMarkers();
+    const listEl = document.getElementById("location-list");
+    listEl.innerHTML = "";
+    snapshot.forEach(doc => {
+      const loc = doc.data();
+      const marker = addMarkerToMap(map, loc);
+      addItemToList(map, loc, marker, doc.id);
+    });
+  }
+
+  document.getElementById("add-location-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("name").value;
+    const address = document.getElementById("address").value;
+    const lat = parseFloat(document.getElementById("lat").value);
+    const lng = parseFloat(document.getElementById("lng").value);
+    const poster = document.getElementById("poster").value;
+    const version = document.getElementById("version").value;
+    const comment = document.getElementById("comment").value;
+
+    if (editId) {
+      await db.collection("locations").doc(editId).update({
+        name, address, lat, lng, poster, version, comment,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      editId = null;
+      document.getElementById("submit-button").textContent = "追加";
+      document.getElementById("cancel-edit").style.display = "none";
+    } else {
+      await locationsRef.add({
+        name, address, lat, lng, poster, version, comment,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    document.getElementById("add-location-form").reset();
+    loadMarkers(map);
+  });
+
+  document.getElementById("cancel-edit").addEventListener("click", () => {
+    document.getElementById("add-location-form").reset();
+    document.getElementById("submit-button").textContent = "追加";
+    editId = null;
+    document.getElementById("cancel-edit").style.display = "none";
+  });
+
+  window.initMap = function () {
+    map = new google.maps.Map(document.getElementById("map"), {
+      zoom: 12,
+      center: { lat: 35.68, lng: 139.76 }
+    });
+
+    map.addListener("click", (e) => {
+      document.getElementById("lat").value = e.latLng.lat();
+      document.getElementById("lng").value = e.latLng.lng();
+    });
+
+    loadMarkers(map);
+  };
+
+  document.getElementById("address").addEventListener("blur", () => {
+    const address = document.getElementById("address").value;
+    if (!address) return;
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ address }, (results, status) => {
+      if (status === "OK") {
+        const loc = results[0].geometry.location;
+        document.getElementById("lat").value = loc.lat();
+        document.getElementById("lng").value = loc.lng();
+      }
+    });
+  });
+</script>
+</body>
+</html>
