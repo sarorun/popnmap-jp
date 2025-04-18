@@ -1,43 +1,50 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <title>ポップン設置店舗マップ</title>
-  <meta charset="UTF-8" />
   <style>
     body {
       font-family: sans-serif;
       margin: 0;
       padding: 1em;
     }
+
     form {
       display: flex;
       flex-wrap: wrap;
       gap: 0.5em;
     }
-    form input, form select, form button {
+
+    form input, form select, form textarea, form button {
       flex: 1 1 200px;
       padding: 0.5em;
     }
+
     #map {
       height: 400px;
       width: 100%;
       margin-top: 1em;
     }
+
     #location-list li {
       background: #f9f9f9;
       margin-bottom: 0.5em;
       padding: 0.5em;
       border-radius: 5px;
     }
+
     @media (min-width: 768px) {
       main {
         display: flex;
         gap: 1em;
       }
+
       #map {
         flex: 2;
         height: 600px;
       }
+
       #location-list {
         flex: 1;
         max-height: 600px;
@@ -61,6 +68,7 @@
     <option value="現行">現行</option>
     <option value="旧シリーズ">旧シリーズ</option>
   </select>
+  <textarea id="comment" placeholder="コメント (任意)" rows="2" style="width:100%;"></textarea>
   <button type="submit" id="submit-button">追加</button>
   <button type="button" id="cancel-edit" style="display:none;">キャンセル</button>
 </form>
@@ -88,7 +96,7 @@
   src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDs2dmtJjvKM8ZZA61sELdl1E17uhiDqog&callback=initMap">
 </script>
 
-<!-- Firebase互換バージョン -->
+<!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
 
@@ -109,16 +117,24 @@
   let map;
   let markers = [];
   let editId = null;
-
   function addMarkerToMap(map, loc) {
     const marker = new google.maps.Marker({
       position: { lat: loc.lat, lng: loc.lng },
       map: map,
-      title: loc.name
+      title: loc.name // ← ホバーで名前が出るように！
     });
 
     const info = new google.maps.InfoWindow({
-      content: `<h3>${loc.name}</h3><p>${loc.address}</p><p>🎵 ${loc.version}</p><p>📝投稿者: ${loc.poster || "匿名"}</p>`
+      content: `
+        <h3>${loc.name}</h3>
+        <p>${loc.address}</p>
+        <p>🎮 ${loc.version}</p>
+        <p>📝 ${loc.poster || "匿名"}</p>
+        <p>💬 ${loc.comment || ""}</p>
+        <a href="https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}" target="_blank">
+          📍 Googleマップで開く
+        </a>
+      `
     });
 
     marker.addListener("click", () => info.open(map, marker));
@@ -134,13 +150,16 @@
   function addItemToList(map, loc, marker, docId) {
     const listEl = document.getElementById("location-list");
     const li = document.createElement("li");
-    const date = loc.createdAt?.toDate?.().toLocaleString?.() || "";
+    const created = loc.createdAt?.toDate()?.toLocaleString?.() || "";
+    const updated = loc.updatedAt?.toDate?.().toLocaleString?.() || "";
 
     li.innerHTML = `
       <strong>${loc.name}</strong> (${loc.address})<br>
       🎮 ${loc.version}<br>
-      📝 ${loc.poster || "匿名"} ${date}<br>
-      <button data-id="${docId}" class="edit-btn">編集</button>
+      📝 ${loc.poster || "匿名"}<br>
+      💬 ${loc.comment || ""}<br>
+      🕒 登録: ${created} ${updated ? "<br>🔄 更新: " + updated : ""}
+      <br><button data-id="${docId}" class="edit-btn">編集</button>
     `;
 
     li.querySelector(".edit-btn").addEventListener("click", () => {
@@ -150,6 +169,7 @@
       document.getElementById("lng").value = loc.lng;
       document.getElementById("poster").value = loc.poster;
       document.getElementById("version").value = loc.version;
+      document.getElementById("comment").value = loc.comment || "";
       editId = docId;
       document.getElementById("submit-button").textContent = "更新";
       document.getElementById("cancel-edit").style.display = "inline";
@@ -189,17 +209,22 @@
     const lng = parseFloat(document.getElementById("lng").value);
     const poster = document.getElementById("poster")?.value || "匿名";
     const version = document.getElementById("version").value;
+    const comment = document.getElementById("comment").value;
 
     if (editId) {
       await db.collection("locations").doc(editId).update({
-        name, address, lat, lng, poster, version
+        name, address, lat, lng, poster, version, comment,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       alert("更新しました！");
       editId = null;
       document.getElementById("submit-button").textContent = "追加";
       document.getElementById("cancel-edit").style.display = "none";
     } else {
-      await locationsRef.add({ name, address, lat, lng, poster, version, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      await locationsRef.add({
+        name, address, lat, lng, poster, version, comment,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
       alert("追加しました！");
     }
 
@@ -232,7 +257,6 @@
     loadMarkers(map);
   };
 
-  // 住所入力から緯度経度自動取得
   document.getElementById("address").addEventListener("blur", () => {
     const address = document.getElementById("address").value;
     if (!address) return;
