@@ -20,19 +20,34 @@
       flex: 1 1 200px;
       padding: 0.5em;
     }
+/* ベースのマップ表示用 */
+#map {
+  width: 100%;
+  height: 400px;
+  margin-top: 1em;
+}
 
-    #map {
-      height: 400px;
-      width: 100%;
-      margin-top: 1em;
-    }
+/* モバイル対応：縦並びにする */
+main {
+  display: flex;
+  flex-direction: column;
+}
 
-    #location-list li {
-      background: #f9f9f9;
-      margin-bottom: 0.5em;
-      padding: 0.5em;
-      border-radius: 5px;
-    }
+/* 横並びは画面が広いときだけ */
+@media (min-width: 768px) {
+  main {
+    flex-direction: row;
+  }
+
+  #map {
+    height: 600px;
+  }
+
+  #location-list {
+    max-height: 600px;
+    overflow-y: auto;
+  }
+}
 
     @media (min-width: 768px) {
       main {
